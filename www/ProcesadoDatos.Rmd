@@ -1,0 +1,1422 @@
+---
+title: "MP3"
+author: "Carlos Gómez"
+date: "2024-04-20"
+output: html_document
+---
+
+## Librerías Necesarias
+
+Cargamos las librerías necesarias para el proyecto.
+
+```{r echo=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(leaflet)
+library(sf)
+library(readr)
+library(leaflet.extras)
+library(shiny)
+library(tidyverse)
+library(imputeTS)
+library(lubridate)
+library(shinythemes)
+library(Hmisc)
+library(calendR)
+library(plotly)
+library(shinydashboard)
+library(patchwork)
+library(gridExtra)
+library(ggplot2)
+```
+
+## 1. Introducción
+
+(Informe)
+
+## 2. Metodología
+
+### 2.1. Análisis exploratorio de los datos
+
+Conjunto de datos que se han utilizado y sus características.
+
+La mayoría de los apartados se harán diferenciando entre los datos obligatorios y los datos opcionales para no tener tanta carga de datos en la zona de trabajo. 
+
+#### Carga de datos
+
+Cargamos los datos obligatorios 
+```{r}
+# Datos obligatorios
+estaciones_contaminacion = read.csv(file = "datos-csv/ESTACIONES_CONTAMINACION.csv", 
+                                    header = T,
+                                    sep = ";")
+
+calidad_aire = read.csv(file = "datos-csv/CALIDAD_AIRE.csv",
+                        header = T,
+                        sep = ";")
+
+distritos_csv <- read.csv(file = "datos-csv/DISTRITOS.csv",
+                     header = T,
+                     sep = ";")
+
+# SHP
+distritos_shp <- st_read("datos-shp/DISTRITOS/districtes-distritos.shp")
+distritos_shp <- st_transform(distritos_shp, 4326)
+```
+
+Cargamos los datos opcionales
+```{r eval=FALSE, include=FALSE}
+# Datos opcionales
+espiras_trafico = read.csv(file = "datos-csv/ESPIRAS_TRAFICO.csv", 
+                           header = T,
+                           sep = ";")
+
+idm = read.csv(file = "datos-csv/IDM.csv", 
+               header = T,
+               sep = ";")
+
+zonas_verdes = read.csv(file = "datos-csv/ZONAS_VERDES.csv",
+                        header = T,
+                        sep = ";")
+
+espiras_bicis = read.csv(file = "datos-csv/ESPIRAS_BICIS.csv", 
+                         header = T,
+                         sep = ";")
+```
+
+Cargamos los datos de QGIS
+
+```{r}
+#geo_aire = read.csv(file = "datos-csv/geo_aire.csv", 
+#                         header = T,
+#                         sep = ",")
+```
+
+
+#### Exploración de datos
+
+Primeramente, necesitamos ver si los datos se han cargado correctamente, por si hubiera que realizar algún cambio en la importación de los mismos. 
+
+Datos obligatorios
+```{r eval=FALSE, include=FALSE}
+head(calidad_aire)
+head(estaciones_contaminacion)
+head(distritos_csv)
+```
+
+```{r eval=FALSE, include=FALSE}
+tail(calidad_aire)
+tail(estaciones_contaminacion)
+tail(distritos_csv)
+```
+
+Datos opcionales
+```{r eval=FALSE, include=FALSE}
+head(espiras_trafico)
+head(idm)
+head(zonas_verdes)
+head(espiras_bicis)
+```
+
+```{r eval=FALSE, include=FALSE}
+tail(espiras_trafico)
+tail(idm)
+tail(zonas_verdes)
+tail(espiras_bicis)
+```
+
+Una vez sabemos que hemos comprobado la carga de los datos, podemos explorar sus características. 
+
+#### Exploración de características
+
+Vamos a mirar los nombres de las variables, las estructuras, los resúmenes y los datos faltantes, NAs, de los datos obligatorios, puesto que serán los que más trabajemos. 
+
+
+Nombres de las variables
+```{r eval=FALSE, include=FALSE}
+colnames(calidad_aire)
+```
+
+```{r eval=FALSE, include=FALSE}
+colnames(estaciones_contaminacion)
+```
+
+```{r eval=FALSE, include=FALSE}
+colnames(distritos_csv)
+```
+
+
+Estructuras
+```{r eval=FALSE, include=FALSE}
+str(calidad_aire)
+```
+
+```{r eval=FALSE, include=FALSE}
+str(estaciones_contaminacion)
+```
+
+```{r eval=FALSE, include=FALSE}
+str(distritos_csv)
+```
+
+
+Resúmenes
+```{r eval=FALSE, include=FALSE}
+summary(calidad_aire)
+```
+
+```{r eval=FALSE, include=FALSE}
+summary(estaciones_contaminacion)
+```
+
+```{r eval=FALSE, include=FALSE}
+summary(distritos_csv)
+```
+
+
+Valores faltantes por variables (NA)
+
+```{r eval=FALSE, include=FALSE}
+colSums(is.na(calidad_aire))
+```
+
+```{r eval=FALSE, include=FALSE}
+colSums(is.na(estaciones_contaminacion))
+```
+
+```{r eval=FALSE, include=FALSE}
+colSums(is.na(distritos_csv))
+```
+
+
+##### Conclusiones (Datos Obligatorios)
+
+Como conclusión podemos sacar que ...
+
+
+### 2.3. Preprocesado de Datos
+
+Filtramos el dataset calidad_aire para quedarnos con las columnas que vemos necesarias. Estas columnas son las que también aparecen en el dataset de las estaciones de contaminación, de esta manera podremos unir los dataframes, o por lo menos las columnas que veamos necesarias. Además, una vez tengamos las columnas necesarias, vamos a quedarnos únicamente con los registros que sean útiles. Puesto que en el dataset tenemos registros que datan desde el 2004 hasta el 2022, vamos a quedarnos con los registros posteriores a el 1 de enero de 2016.
+
+```{r}
+datitos2 <- merge(distritos_shp, distritos_csv, by = "objectid")
+
+datitos2 <- datitos2 %>%
+  select(-Nombre, -Código.distrito, -gis.gis.DISTRITOS.area)
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+calidad_aire_filtrado <- calidad_aire %>%
+  # Seleccionamos las columnas
+  select(Id, Fecha, Estacion, SO2, NO2, O3, CO, PM10, PM2.5, Ruido) %>%
+  
+  # Filtramos por año
+  filter(as.Date(Fecha) > as.Date("2016-01-01"))
+```
+
+Ahora vamos a renombrar las variables del dataset estaciones_contaminacion para que sean representativos y así poder trabajar mejor
+
+```{r echo=FALSE, warning=FALSE}
+estaciones_contaminacion <- estaciones_contaminacion %>%
+  rename(
+    Id = objectid,
+    Fecha = Data.Càrrega...Fecha.Carga,
+    Estacion = Nom...Nombre,
+    Direccion = Adreça...Direccion,
+    Tipo_Zona = Tipus.Zona...Tipo.Zona,
+    Tipo_Emision = Tipus.Emissió...Tipo.Emisión,
+    Parametros = Paràmetres...Parámetros,
+    Mediciones = Mesuraments...Mediciones,
+    Calidad_Ambiental = Qualitat.Ambiental...Calidad.Ambiental
+  )
+
+colnames(estaciones_contaminacion)
+```
+
+Vamos a unir ambos datasets, ya que son bastante útiles y están relacionados.
+Primero miramos los nombres de las estaciones. 
+
+```{r eval=FALSE, include=FALSE}
+unique(calidad_aire_filtrado$Estacion)
+unique(estaciones_contaminacion$Estacion)
+```
+
+Parece ser que las estaciones que coinciden, a pesar de estar mal escritas, son: Pista Silla/Pista de Silla, Politecnico/Universidad Politécnica, Valencia Centro/Centro, Avda. Francia/Francia, Bulevard Sud/Boulevar Sur, Moli del Sol/Molí del Sol, Viveros/Viveros, Valencia Olivereta/Olivereta.
+
+Por lo que vamos a corregir los nombres. 
+
+Para el dataset de calidad_aire_filtrado los nombres serán:
+Universidad Politécnica y Molí del Sol.
+
+```{r}
+calidad_aire_filtrado$Estacion <- gsub("Politecnico", 
+                                       "Universidad Politécnica", 
+                                       calidad_aire_filtrado$Estacion)
+
+calidad_aire_filtrado$Estacion <- gsub("Moli del Sol", 
+                                       "Molí del Sol", 
+                                       calidad_aire_filtrado$Estacion)
+```
+
+Para el dataset de estaciones_contaminación los nombres serán:
+Pista Silla, Valencia Centro, Avda. Francia, Bulevard Sud y Valencia Olivereta.
+
+```{r}
+estaciones_contaminacion$Estacion <- gsub("Pista de Silla", 
+                                          "Pista Silla", 
+                                          estaciones_contaminacion$Estacion)
+
+estaciones_contaminacion$Estacion <- gsub("Centro", 
+                                          "Valencia Centro", 
+                                          estaciones_contaminacion$Estacion)
+
+estaciones_contaminacion$Estacion <- gsub("Francia", 
+                                          "Avda. Francia", 
+                                          estaciones_contaminacion$Estacion)
+
+estaciones_contaminacion$Estacion <- gsub("Boulevar Sur", 
+                                          "Bulevard Sud", 
+                                          estaciones_contaminacion$Estacion)
+
+estaciones_contaminacion$Estacion <- gsub("Olivereta", 
+                                          "Valencia Olivereta", 
+                                          estaciones_contaminacion$Estacion)
+```
+
+Comprobamos que se han corregido correctamente
+
+```{r eval=FALSE, include=FALSE}
+unique(calidad_aire_filtrado$Estacion)
+unique(estaciones_contaminacion$Estacion)
+```
+
+# Arreglar dataframe distritos
+```{r}
+# Hacer que las variables de unión sean del mismo tipo de dato
+datitos2$objectid <- as.numeric(datitos2$objectid)
+```
+
+
+# Crear dataframe de calidad de aire
+```{r eval=FALSE, include=FALSE}
+# Nombre de las estaciones de calidad_aire
+unique(calidad_aire_filtrado$Estacion) # hay que saber a qué distrito pertenecen
+
+```
+
+```{r}
+calidad_aire_filtrado$Código.distrito <- NA
+
+# Crear un data.frame con la correspondencia estación-código_distrito
+estaciones_codigos <- data.frame(
+  Estacion = c("Puerto llit antic Turia", "Pista Silla", 
+               "Universidad Politécnica", "Valencia Centro", "Avda. Francia", 
+               "Bulevard Sud", "Molí del Sol", "Puerto Moll Trans. Ponent", 
+               "Nazaret Meteo", "Viveros", "Valencia Olivereta", 
+               "Puerto Valencia"),
+  Codigo_distrito = c(11, 2, 13, 1, 12, 9, 4, 11, 11, 5, 7, 11))
+
+# Asignar el código de distrito para cada estación
+calidad_aire_filtrado$Código.distrito <- estaciones_codigos$Codigo_distrito[match(calidad_aire_filtrado$Estacion,
+                                                                                  estaciones_codigos$Estacion)]
+
+```
+
+```{r}
+datitos2$coddistrit <- as.numeric(datitos2$coddistrit)
+
+geo_contaminacion <- full_join(datitos2, calidad_aire_filtrado, by=c("coddistrit" = "Código.distrito"))
+
+geo_contaminacion <- geo_contaminacion %>%
+  filter(!is.na(nombre)) %>%
+  mutate(Fecha = as.Date(Fecha)) %>%
+  mutate(año = year(Fecha),
+         mes = month(Fecha),
+         dia = day(Fecha)) %>%
+  select(objectid, coddistrit, nombre, dia, mes, año, Fecha, Id, Estacion, SO2, NO2, O3, CO, PM10, PM2.5, Ruido, latitud, longitud, geometry, gis_gis_dis, geo_shape, geo_point_2d)
+```
+
+```{r}
+geo_contaminacion <- geo_contaminacion %>%
+  mutate(SO2 = ifelse(is.na(SO2), 0, SO2),
+         NO2 = ifelse(is.na(NO2), 0, NO2),
+         O3 = ifelse(is.na(O3), 0, O3),
+         CO = ifelse(is.na(CO), 0, CO),
+         PM10 = ifelse(is.na(PM10), 0, PM10),
+         PM2.5 = ifelse(is.na(PM2.5), 0, PM2.5),
+         Ruido = ifelse(is.na(Ruido), 0, Ruido))
+
+geo_contaminacion$año <- as.factor(geo_contaminacion$año)
+geo_contaminacion$mes <- as.factor(geo_contaminacion$mes)
+geo_contaminacion$dia <- as.factor(geo_contaminacion$dia)
+```
+
+```{r}
+datos_nuevos <- data.frame(
+  nombre = c("CAMPANAR", "L'EIXAMPLE", "CAMINS AL GRAU", "JESUS", "L'OLIVERETA", 
+             "POBLATS DEL SUD", "POBLATS MARITIMS", 
+             "LA SAIDIA", "ALGIROS", "POBLATS DE L'OEST", "CIUTAT VELLA"),
+  coddistrit = c(4, 2, 12, 9, 7, 19, 11, 5, 13, 18, 1),
+  Id = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+  dia = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+  mes = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+  año = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+  Fecha = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+  Estacion = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+  SO2 = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  NO2 = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  O3 = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  CO = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  PM10 = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  PM2.5 = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  Ruido = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  latitud = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+  longitud = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+  gis_gis_dis = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+  geo_shape = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+  geo_point_2d = c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA)
+)
+
+data <- merge(distritos_shp[,c("coddistrit", "geometry", "objectid")], datos_nuevos, by = "coddistrit", all.x = TRUE)
+
+data <- data %>%
+  filter(!is.na(nombre))
+
+geo_contaminacion <- rbind(geo_contaminacion, data)
+```
+
+```{r}
+coord_split <- strsplit(as.character(estaciones_contaminacion$geo_point_2d), ", ")
+latitudes <- as.numeric(sapply(coord_split, function(x) as.numeric(x[1])))
+longitudes <- as.numeric(sapply(coord_split, function(x) as.numeric(x[2])))
+
+estaciones_contaminacion$longitud <- longitudes
+estaciones_contaminacion$latitudes <- latitudes
+```
+
+
+## Mapas
+
+Aquí empieza ya lo bueno
+
+```{r}
+# unico <- as.data.frame(unique(geo_contaminacion$nombre))
+```
+
+
+```{r}
+# geo_contaminacion %>%
+#   filter(nombre == "RASCANYA") %>% 
+#   summary()
+```
+
+
+## Guardar geo contaminacion 
+```{r}
+# st_write(geo_contaminacion, "./geo_contaminacion/geo_contaminacion.shp")
+```
+
+## Guardar distritos_shp
+```{r}
+# st_write(distritos_shp, "./distritos_shp/distritos_shp.shp")
+```
+
+# Guardar estaciones
+```{r}
+# write.csv(estaciones_contaminacion, "./estaciones_csv/estaciones.csv", row.names = FALSE)
+```
+
+
+## Cargamos los ficheros
+```{r}
+geo_contaminacion_shiny <- st_read("geo_contaminacion/geo_contaminacion.shp")
+geo_contaminacion_shiny <- st_transform(geo_contaminacion_shiny, 4326)
+
+geo_contaminacion_shiny <- geo_contaminacion_shiny %>%
+  rename(Estacion = Estacin) %>%
+  rename(PM2.5 = PM2_5) %>%
+  select(-Ruido)
+
+geo_contaminacion_shiny$dia <- as.numeric(geo_contaminacion_shiny$dia)
+geo_contaminacion_shiny$mes <- as.numeric(geo_contaminacion_shiny$mes)
+geo_contaminacion_shiny$año <- as.numeric(geo_contaminacion_shiny$año)
+geo_contaminacion_shiny$MesDia <- format(geo_contaminacion_shiny$Fecha, "%m-%d")  
+
+
+distritos_shiny <- st_read("distritos_shp/distritos_shp.shp")
+distritos_shiny <- st_transform(distritos_shiny, 4326)
+
+
+estaciones_shiny <- read.csv2("estaciones_csv/estaciones.csv", sep = ",")
+estaciones_shiny <- estaciones_shiny %>%
+  mutate(longitud = as.numeric(longitud)) %>%
+  mutate(latitud = as.numeric(latitudes))
+
+# Listar todas las variables en el entorno global
+variables <- ls()
+
+# Seleccionar las tres variables que deseas conservar
+variables_a_mantener <- c("geo_contaminacion_shiny", "distritos_shiny", "estaciones_shiny")
+
+# Identificar las variables que deseas eliminar
+variables_a_eliminar <- setdiff(variables, variables_a_mantener)
+
+# Eliminar las variables seleccionadas
+rm(list = variables_a_eliminar)
+```
+
+
+## Mapa de calor
+
+```{r  eval=FALSE, include=FALSE}
+datos_mapa_calor <- geo_contaminacion_shiny %>%
+  filter(año == "2021") %>%
+  group_by(Estacion, mes) %>%
+  summarise(Media = mean(SO2, na.rm = T), .groups = 'drop') %>%
+  mutate(Media_round = round(Media, 2))
+```
+
+```{r  eval=FALSE, include=FALSE}
+ggplot(datos_mapa_calor, aes(x = mes, y = Estacion, fill = Media_round)) +
+  geom_tile(color = "black") +
+  scale_fill_gradient(low = "white", high = "red") +
+  coord_fixed() +
+  guides(fill = guide_colourbar(barwidth = 1,
+                                barheight = 10))
+```
+
+## Mapa de violín 
+
+```{r  eval=FALSE, include=FALSE}
+datos_mapa_violin <-  geo_contaminacion_shiny %>%
+  select(Estacion, Fecha, SO2) %>%
+  filter(!is.na(Estacion))
+```
+
+```{r  eval=FALSE, include=FALSE}
+ggplot(datos_mapa_violin, aes(x = Estacion, y = SO2, fill = Estacion)) +
+  geom_violin() +
+  stat_summary(fun = "mean", geom = "crossbar", width = 0.1, colour = "red") +
+  facet_wrap(~Estacion, nrow = 3, scales = "free_x") +
+  theme(axis.text.x = element_blank(), aspect.ratio = 5/6) +
+  guides(fill = F)
+```
+
+
+
+## Mapa carmen aka nenaRexulona
+
+```{r}
+datos_mapa <- geo_contaminacion_shiny %>%
+  filter(año == 2018 | is.na(año)) %>%
+  filter(mes == 3 | is.na(año)) %>%
+  group_by(nombre) %>%
+  summarise(Media = mean(SO2)) 
+```
+
+
+```{r}
+# Creamos una paleta monocromática de blanco a azul
+n_colores <- 4
+colores <- colorRampPalette(c("#b5cfa8", "#2f4626"))(n_colores)
+
+# Calculamos los cuantiles excluyendo explícitamente los valores iguales a 0
+cuantiles <- quantile(datos_mapa$Media[datos_mapa$Media > 0], probs = seq(0, 1, length.out = n_colores))
+
+# Añadimos 0 como el primer cuantil para indicar "Sin datos"
+cuantiles <- c(0, cuantiles)
+
+# Creamos las etiquetas
+etiquetas <- cut(datos_mapa$Media, breaks = cuantiles, include.lowest = TRUE, labels = FALSE)
+etiquetas <- factor(etiquetas, levels = 1:(n_colores+1), labels = c("Sin datos", "Baja", "Media baja", "Media alta", "Alta"))
+
+# Creamos el mapa de coropletas interactivo
+mapa_coropletas2 <- leaflet(data = datos_mapa) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(fillColor = ~ifelse(Media == 0 | is.na(Media), "#FFFFFF", colores[as.numeric(etiquetas)]),
+              fillOpacity = 0.7,
+              color = "gray",
+              weight = 1,
+              label = datos_mapa$nombre,
+              popup = ~paste("Distrito: ", nombre, "<br>",
+                             "Media de PM10: ", round(Media, 2), "<br>"),
+              highlightOptions = highlightOptions(
+                color = "black",
+                fillOpacity = 1,
+                bringToFront = TRUE,
+                weight = 3
+              )) %>%
+  addLegend("bottomright",
+            title = "Media de PM10",
+            colors = c("#FFFFFF", colores), # Include white color in legend
+            labels = c("Sin datos", "Baja", "Media baja", "Media alta", "Alta"),
+            opacity = 0.7)
+
+mapa_coropletas2
+```
+
+
+```{r}
+# Cargamos los datos para BICIS
+carrils_bici <- st_read("QGIS/carrils_bici.shp")
+carrils_bici <- st_transform(carrils_bici, 4326)
+
+aparcament_bici <- st_read("QGIS/aparcament_bici.gpkg")
+aparcament_bici <- st_transform(aparcament_bici, 4326)
+aparcament_bici <- st_centroid(aparcament_bici)
+
+# Cargamos los datos para METROBUS
+bus_boca <- st_read("QGIS/bus_boca.shp")
+bus_boca <- st_transform(bus_boca, 4326)
+bus_boca <- st_centroid(bus_boca)
+
+metro_boca <- st_read("QGIS/metro_boca.shp")
+metro_boca <- st_transform(metro_boca, 4326)
+metro_boca <- st_centroid(metro_boca)
+
+# Cargamos los datos para CARGADORES
+carregadors <- st_read("QGIS/carregadors.shp")
+carregadors <- st_transform(carregadors, 4326)
+carregadors <- st_centroid(carregadors)
+```
+
+```{r}
+
+data_box <- geo_contaminacion_shiny %>%
+      filter(!is.na(Estacion)) %>%
+      group_by(mes, Estacion) %>%
+  summarise(Media = mean(NO2), na.rm = T, .groups = "drop")
+
+data <- geo_contaminacion_shiny %>%
+  filter(Estacion == "Molí del Sol") %>% 
+  filter(año == 2016) %>%
+  group_by(mes) %>%
+  summarise(Media = mean(NO2), na.rm = T) 
+
+data2 <- geo_contaminacion_shiny %>%
+  group_by(mes, Estacion) %>%
+  summarise(Media = mean(NO2), na.rm = T) 
+
+data3 <- geo_contaminacion_shiny %>%
+  filter(!is.na(Estacion)) %>%
+  group_by(mes, Estacion) 
+
+data4 <- geo_contaminacion_shiny %>%
+  filter(año == 2016) %>% 
+  group_by(Estacion, mes) %>%
+  summarise(Media = mean(SO2), na.rm = T)
+  
+
+box <- ggplot(data, aes(x = "", y = Media)) +
+  geom_boxplot() + 
+  xlab("Molí del Sol")
+
+box2 <- ggplot(data3, aes(x = Estacion, y = NO2, fill = Estacion)) +
+  geom_boxplot() +
+  stat_summary(fun = "mean") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+tab <- t(round(quantile(data$Media), 2))
+
+líneas <- ggplot(data, aes(x = mes, y = Media)) +
+  geom_line() +
+  geom_point()
+
+dispersion <- ggplot(data, aes(x = mes, y = Media)) +
+  geom_point(color = "gray20")
+
+densidad <- ggplot(data, aes(x = Media, fill = factor(mes))) +
+  geom_density(alpha = 0.5) 
+
+puntos <- ggplot(data4, aes(x = Estacion, y = Media, color = Estacion, size = Media)) +
+  geom_point() + 
+  geom_jitter() 
+
+puntos
+
+densidad
+
+(box | tableGrob(tab)) / líneas
+
+box2
+```
+
+
+## Calndar
+
+```{r}
+estacion <- "Pista Silla"
+
+datos_estacion <- geo_contaminacion_shiny %>%
+  filter(Estacion == estacion, año == 2022)
+
+# Crea un vector donde todos los valores son ligeramente
+# inferiores que el mínimo valor de NO2 de los datos
+dias_sin_datos <- rep(min(datos_estacion$NO2) - 0.05, 365)
+
+# Rellena los días con los datos de NO2 disponibles
+for (i in 1:nrow(datos_estacion)) {
+  fecha <- as.Date(paste(datos_estacion$año[i], datos_estacion$mes[i], datos_estacion$dia[i], sep = "-"))
+  indice <- as.numeric(format(fecha, "%j"))
+  dias_sin_datos[indice] <- datos_estacion$NO2[i]
+}
+
+calendR(year = 2022,
+        special.days = dias_sin_datos,
+        low.col = "white",
+        special.col = "#FF0000",
+        gradient = TRUE,
+        legend.pos = "bottom")
+```
+
+
+
+## Cuadro de mandos (ui)
+
+```{r}
+ui <- navbarPage(
+  
+  title = div(align = "center", "Visualización de Datos"),
+  
+  tags$head(
+    tags$style(
+      HTML(
+        "
+         .navbar {
+          position: fixed;
+          width: 100%;
+          z-index: 1000;
+        }
+        
+        .tab-content {
+          margin-top: 6%;
+        }
+        "
+      )
+    )
+  ),
+  
+  theme = shinytheme("flatly"),
+  # title = "Visualización de Datos",
+  
+  # PPAL
+  tabPanel("PROYECTO",
+           
+           # Configuración página
+           fluidPage(
+             
+             # Imagen
+             img(src = "https://s3-eu-central-1.amazonaws.com/aws-ec2-eu-central-1-opendatasoft-staticfileset/valencia/theme_image/Portal%20datos%20abiertos.jpg"),
+             
+             # Texto de tipo párrafo
+             p("Para poder mostrar el mapa principal, descárgate los archivos ShapeFile de los siguientes enlaces y cárgalos."
+               ),
+             
+             # Descarga de Distritos 
+             em("Archivos de Distritos: "),
+             a(href = "https://valencia.opendatasoft.com/explore/dataset/districtes-distritos/export/?location=10,39.42291,-0.35395&basemap=e4bf90", "DISTRITOS"),
+             
+             br(),
+             
+             # Descarga de Estaciones
+             em("Archivos de Estaciones: "),
+             a(href = "https://valencia.opendatasoft.com/explore/dataset/estacions-contaminacio-atmosferiques-estaciones-contaminacion-atmosfericas/export/", "ESTACIONES"),
+             
+             br(),
+             br(),
+             
+             # Aviso
+             strong("AVISO:"),
+             br(),
+             strong("Si los archivos no son cargados en sus correspondientes widgets, el mapa no funcionará."),
+             
+             hr(),
+             
+             # Zona de trabajo
+             sidebarLayout(
+               
+               # Barra lateral
+               sidebarPanel(
+                 fileInput("PPAL_fileInput1", "Selecciona el archivo de Distritos:"),
+                 fileInput("PPAL_fileInput2", "Selecciona el archivo de Estaciones:")
+                 ), # Termina el sidebarPanel
+               
+               # Panel principal
+               mainPanel(
+                 leafletOutput("PPAL_mapa")
+                 ) # Termina el mainPanel
+               
+               ) # Termina el sidebarLayout
+             
+             ) # Termina el fluidPage
+           
+           ), # Termina tabPanel PROYECTO
+  
+  # CONTAMINACIÓN ATMOSFÉRICA
+  tabPanel("CONTAMINACIÓN ATMOSFÉRICA", 
+           
+           # Configuración página
+           fluidPage(
+             
+             # Configuración Olaf
+             tabsetPanel(
+               
+               # Panel MAPA COROPLETAS
+               tabPanel("MAPA COROPLETAS",
+                 
+                 # Zona de trabajo
+                 sidebarLayout(
+                   
+                   # Barra lateral
+                   sidebarPanel(
+                     
+                     # Seleccionador de partículas
+                     selectInput("COROPLETAS_selectInputParticula", "Selecciona la partícula",
+                                 choices = c("SO2", "NO2", "O3", "CO", "PM10", "PM2.5"),
+                                 selected = "SO2"
+                                 ), # Termina selectInput Particula
+                     
+                     # Seleccionador de los meses
+                     sliderInput("COROPLETAS_sliderInputMes", "Selecciona un mes",
+                                 value = 6, 
+                                 min = min(geo_contaminacion_shiny$mes, na.rm = T), 
+                                 max = max(geo_contaminacion_shiny$mes, na.rm = T),
+                                 ), # Termina sliderInput MES
+                     
+                     # Seleccionador de los años
+                     sliderInput("COROPLETAS_sliderInputAño", "Selecciona un año",
+                                 value = min(geo_contaminacion_shiny$año, na.rm = T), 
+                                 min = min(geo_contaminacion_shiny$año, na.rm = T), 
+                                 max = max(geo_contaminacion_shiny$año, na.rm = T)
+                                 ) # Termina sliderInput AÑO
+                     
+                   ), # Termina sidebarPanel
+                   
+                   # Panel principal
+                   mainPanel(
+                     
+                     # Mapa de coropletas
+                     leafletOutput("COROPLETAS")
+                     
+                   ) # Termina mainPanel
+                 
+               ), # Termina sidebarLayout
+               
+               ), # Termina tabPanel MAPA COROPLETAS
+               
+               
+               # Panel GRÁFICOS
+               tabPanel("GRÁFICOS",
+                 
+                 # Zona de trabajo para PLOTLY 
+                 sidebarLayout(
+                   
+                   # Barra lateral
+                   sidebarPanel(
+                     
+                     # Seleccionador de las estaciones
+                     selectInput("PLOTLY_selectInputEstacion", 
+                                 "Selecciona una estacion",
+                                 choices = c("Molí del Sol", "Pista Silla", "Avda. Francia",
+                                             "Bulevard Sud", "Valencia Olivereta", 
+                                             "Puerto llit antic Turia", 
+                                             "Puerto Moll Trans. Ponent", "Nazaret Meteo", 
+                                             "Puerto Valencia", "Viveros", 
+                                             "Universidad Politécnica", "Valencia Centro"),
+                                 selected = "Avda. Francia"
+                                 ), # Termina selectInput Estacion
+                     
+                     # Seleccionador de las partículas
+                     selectInput("PLOTLY_selectInputParticula",
+                                 "Selecciona una partícula",
+                                 choices = c("SO2", "NO2", "O3", "CO", "PM10", "PM2.5"),
+                                 selected = "SO2"
+                                 )
+                     
+                   ), # Termina sidebarPanel
+                   
+                   # Panel principal
+                   mainPanel(
+                     
+                     # Gráfico de plotly
+                     plotlyOutput("PLOTLY")
+                     
+                     
+                   ) # Termina mainPanel
+                 
+               ), # Termina sidebarLayout
+               
+               hr(),
+               
+               # Zona de trabajo para VIOLIN y CALENDR
+               sidebarLayout(
+                 
+                 # Barra lateral  
+                 sidebarPanel(
+                   
+                   # Seleccionador de los años
+                     sliderInput("VIOLINR_sliderInputAño", "Selecciona un año",
+                                 value = min(geo_contaminacion_shiny$año, na.rm = T), 
+                                 min = min(geo_contaminacion_shiny$año, na.rm = T), 
+                                 max = max(geo_contaminacion_shiny$año, na.rm = T)
+                                 ), # Termina sliderInput AÑO
+                     
+                    # Seleccionador de las partículas
+                     selectInput("VIOLINR_selectInputParticula",
+                                 "Selecciona una partícula",
+                                 choices = c("SO2", "NO2", "O3", "CO", "PM10", "PM2.5"),
+                                 selected = "SO2"
+                                 ),
+                    
+                    # Seleccionador de las estaciones
+                     selectInput("VIOLINR_selectInputEstacion", 
+                                 "Selecciona una estacion",
+                                 choices = c("Molí del Sol", "Pista Silla", "Avda. Francia",
+                                             "Bulevard Sud", "Valencia Olivereta", 
+                                             "Puerto llit antic Turia", 
+                                             "Puerto Moll Trans. Ponent", "Nazaret Meteo", 
+                                             "Puerto Valencia", "Viveros", 
+                                             "Universidad Politécnica", "Valencia Centro"),
+                                 selected = "Avda. Francia"
+                                 ) # Termina selectInput Estacion
+                 ),
+                 
+                 
+                 # Panel principal
+                 mainPanel(
+                   
+                   # Gráfico calendR
+                   uiOutput("CALENDR"),
+                   
+                   # Gráfico Violin
+                   plotOutput("VIOLIN")
+                   
+                 )
+                 
+               )
+                 
+               ), # Termina tabPanel GRÁFICOS
+               
+               
+               # Panel DATOS
+               tabPanel("DATOS",
+                 
+                 # Zona de trabajo
+                 sidebarLayout(
+                   
+                   # Barra lateral
+                   sidebarPanel(
+                     
+                     # Seleccionar una partícula
+                     selectInput("DATOS_sliderInputParticula", "Selecciona una variable",
+                                 choices = c("SO2", "NO2", "O3", "CO", "PM10", "PM2.5"),
+                                 selectize = T,
+                                 multiple = T
+                                 ), # Termina selectInput Particula
+                     
+                     selectInput("DATOS_sliderInputEstacion", "Selecciona una estacion",
+                                 choices = c("Molí del Sol", "Pista Silla", "Avda. Francia",
+                                             "Bulevard Sud", "Valencia Olivereta", 
+                                             "Puerto llit antic Turia", 
+                                             "Puerto Moll Trans. Ponent", "Nazaret Meteo", 
+                                             "Puerto Valencia", "Viveros", 
+                                             "Universidad Politécnica", "Valencia Centro"),
+                                 selectize = T,
+                                 multiple = T
+                                 ), # Termina selectInput Estacion
+                     
+                   ), # Termina sidebarPanel
+                   
+                   # Panel principal
+                   mainPanel(
+                     
+                     dataTableOutput("DATOS_dataTable")
+                     
+                   ) # Termina mainPanel
+                 
+               ), # Termina sidebarLayout
+                 
+               ) # Termina tabPanel DATOS
+               
+             ) # Termina tabsetPanel (Olaf)
+             
+           ) # Termina fluidPage
+           
+           ), # Termina tabPanel CONTAMINACIÓN ATMOSFÉRICA
+  
+  # MOVILIDAD SOSTENIBLE
+  tabPanel("MOVILIDAD SOSTENIBLE", 
+           
+           # Configuración página
+           fluidPage(
+             
+             # Configuración Olaf
+             tabsetPanel(
+               
+               # Panel BICIS
+               tabPanel("BICIS",
+                 
+                 # Zona de trabajo
+                 sidebarLayout(
+                   
+                   # Barra lateral
+                   sidebarPanel(
+                     
+                     # Párrafo
+                     p("Texto informativo sobre el mapa")
+                     
+                   ), # Termina sidebarPanel
+                   
+                   # Panel principal
+                   mainPanel(
+                     
+                     # Mapa de BICIS
+                     leafletOutput("BICIS_leaflet")
+                     
+                   ) # Termina mainPanel
+                 
+               ), # Termina sidebarLayout
+               
+               ), # Termina tabPanel BICIS
+               
+               
+               # Panel METRO Y BUS
+               tabPanel("METRO Y BUS",
+                 
+                 # Zona de trabajo
+                 sidebarLayout(
+                   
+                   # Barra lateral
+                   sidebarPanel(
+                     
+                     # Párrafo
+                     p("Texto informativo sobre el mapa")
+                     
+                   ), # Termina sidebarPanel
+                   
+                   # Panel principal
+                   mainPanel(
+                     
+                     # Mapa de METRO Y BUS
+                     leafletOutput("METROBUS_leaflet")
+                     
+                   ) # Termina mainPanel
+                 
+               ), # Termina sidebarLayout
+                 
+               ), # Termina tabPanel METRO Y BUS
+               
+               
+               # Panel CARGADORES VEHÍCULOS ELÉCTRICOS
+               tabPanel("CARGADORES VEHÍCULOS ELÉCTRICOS",
+                 
+                 # Zona de trabajo
+                 sidebarLayout(
+                   
+                   # Barra lateral
+                   sidebarPanel(
+                     
+                     # Párrafo
+                     p("Texto informativo sobre el mapa")
+                     
+                   ), # Termina sidebarPanel
+                   
+                   # Panel principal
+                   mainPanel(
+                     
+                     # Mapa de CARGADORES VEHÍCULOS ELÉCTRICOS
+                     leafletOutput("CARGADORES_leaflet")
+                     
+                   ) # Termina mainPanel
+                 
+               ), # Termina sidebarLayout
+                 
+                 
+               ) # Termina tabPanel CARGADORES VEHÍCULOS ELÉCTRICOS
+               
+             ) # Termina tabsetPanel (Olaf)
+             
+           ) # Termina fluidPage
+           
+           ), # Termina tabPanel MOVILIDAD SOSTENIBLE
+  
+  # ZONAS VERDES
+  tabPanel("ZONAS VERDES","contenido")
+  
+)
+
+server <- function(input, output, session) {
+  
+  # PPAL_mapa
+  # Renderizamos el mapa
+  output$PPAL_mapa <- renderLeaflet({
+    
+    leaflet() %>%
+      
+      addProviderTiles("CartoDB.Positron", 
+                       group = "CartoDB.Positron") %>%
+      
+      addProviderTiles("OpenStreetMap", 
+                       group = "OpenStreetMap") %>%
+      
+      addProviderTiles("Esri.WorldImagery", 
+                       group = "Esri.WorldImagery") %>%
+      
+      setView(lng = -0.37, 
+              lat = 39.47, 
+              zoom = 13) %>%
+      
+      addMarkers(data = estaciones_shiny,
+                 lng = ~as.numeric(longitud),
+                 lat = ~as.numeric(latitud),
+                 popup = ~Estacion) %>%
+      
+      addPolygons(data = distritos_shiny, 
+                  color = "gray", 
+                  fillColor = 'orange',
+                  fillOpacity = 0.5,
+                  weight = 2,
+                  label = distritos_shiny$nombre,
+                  highlightOptions = highlightOptions(
+                    color = "gray", 
+                    fillColor = 'orange',  
+                    fillOpacity = 0.8,  
+                    bringToFront = TRUE
+                  )) %>%
+      addLayersControl(baseGroups = c("CartoDB.Positron", "OpenStreetMap", "Esri.WorldImagery"))
+  })
+  
+  
+  # COROPLETAS
+  # Cargamos los datos
+  coropletas_shiny <- reactive({
+    datos_coropletas <- geo_contaminacion_shiny %>%
+      filter(año == input$COROPLETAS_sliderInputAño | is.na(año)) %>%
+      filter(mes == input$COROPLETAS_sliderInputMes | is.na(año)) %>%
+      group_by(nombre) %>%
+      summarise(Media = mean(get(input$COROPLETAS_selectInputParticula)))
+
+    return(datos_coropletas)
+  })
+
+  # Renderizamos el mapa
+  output$COROPLETAS <- renderLeaflet({
+
+    datos_mapa_coropletas <- coropletas_shiny()
+
+    n_colores <- 4
+
+    colores <- colorRampPalette(c("#b5cfa8", "#2f4626"))(n_colores)
+
+    cuantiles <- quantile(datos_mapa_coropletas$Media[datos_mapa_coropletas$Media > 0],
+                          probs = seq(0, 1, length.out = n_colores))
+
+    cuantiles <- c(0, cuantiles)
+
+    etiquetas <- cut(datos_mapa_coropletas$Media,
+                     breaks = cuantiles,
+                     include.lowest = TRUE,
+                     labels = FALSE)
+
+    etiquetas <- factor(etiquetas,
+                        levels = 1:(n_colores+1),
+                        labels = c("Sin datos", "Baja", "Media baja",
+                                   "Media alta", "Alta"))
+
+    leaflet(data = datos_mapa_coropletas) %>%
+
+      addProviderTiles("CartoDB.Positron") %>%
+
+      addPolygons(fillColor = ~ifelse(Media == 0 | is.na(Media),
+                                      "#FFFFFF",
+                                      colores[as.numeric(etiquetas)]),
+                  fillOpacity = 0.7,
+                  color = "gray",
+                  weight = 1,
+                  label = datos_mapa_coropletas$nombre,
+                  popup = ~paste("Distrito: ",
+                                 nombre,
+                                 "<br>",
+                                 "Media de",
+                                 input$COROPLETAS_selectInputParticula,
+                                 ": ",
+                                 round(Media, 2),
+                                 "<br>"),
+
+                  highlightOptions = highlightOptions(
+                    color = "black",
+                    fillOpacity = 1,
+                    bringToFront = TRUE,
+                    weight = 3)) %>%
+
+      addLegend("bottomright",
+                title = paste("Media de ",
+                              input$COROPLETAS_selectInputParticula),
+
+                colors = c("#FFFFFF",
+                           colores),
+
+                labels = c("Sin datos", "Baja", "Media baja",
+                           "Media alta", "Alta"),
+
+                opacity = 0.7)
+    })
+  
+  
+  # PLOTLY
+  # Cargamos los datos
+  plotly_shiny <- reactive({
+    datos_plotly <- geo_contaminacion_shiny %>%
+      filter(Estacion == input$PLOTLY_selectInputEstacion) %>%
+      filter(input$PLOTLY_selectInputParticula != 0) %>%
+      group_by(año, MesDia) %>%
+      summarise(Media = mean(input$PLOTLY_selectInputParticula)) %>%
+      arrange(MesDia)
+    
+    return(as.data.frame(datos_plotly))
+
+  })
+
+  output$PLOTLY <- renderPlotly({
+    
+    datos_mapa_plotly <- plotly_shiny()
+    
+    plot_ly(datos_mapa_plotly, 
+            x = ~MesDia, 
+            y = ~Media,
+            type = "scatter",
+            mode = "lines",
+            frame = ~año) %>%
+      
+      layout(xaxis = list(title = "Fecha", 
+                          zeroline = FALSE),
+             
+             yaxis = list(title = paste(input$PLOTLY_selectInputParticula), 
+                          zeroline = FALSE),
+             
+             title = paste("Evolución de", 
+                           input$PLOTLY_selectInputParticula,
+                           "en la estación", 
+                           input$PLOTLY_selectInputEstacion),
+             transition = 5000)
+    })
+  
+  # BICIS
+  # Renderizamos el mapa 
+  output$BICIS_leaflet <- renderLeaflet({
+    
+    leaflet() %>%
+      
+      addProviderTiles("CartoDB.Positron",
+                       group = "CartoDB.Positron") %>%
+      
+      addProviderTiles("OpenStreetMap", 
+                       group = "OpenStreetMap") %>%
+      
+      addProviderTiles("Esri.WorldImagery", 
+                       group = "Esri.WorldImagery") %>% 
+      
+      addPolygons(data = distritos_shiny, 
+                  color = "gray", 
+                  fillColor = 'beige',
+                  fillOpacity = 0.5,
+                  weight = 1) %>%    
+      
+      addPolylines(data = carrils_bici,
+                   color = "navy",
+                   fillColor = "navy",
+                   fillOpacity = 0.4,
+                   weight = 2,
+                   group = "Carriles",
+                   label = carrils_bici$nombre,
+                   highlightOptions = highlightOptions(
+                     color = "navy",
+                     fillOpacity = 1,
+                     bringToFront = FALSE,
+                     weight = 3)) %>%
+      
+      addCircleMarkers(data = aparcament_bici,
+                       color = "maroon",
+                       fillColor = "maroon",
+                       fillOpacity = 0.4,
+                       radius = 5, 
+                       weight = 2,
+                       group = "Aparcamientos",
+                       clusterOptions = markerClusterOptions(),
+                       popup = ~paste("Nº de plazas: ", 
+                                      aparcament_bici$numplazas)) %>%
+      
+      addLayersControl(overlayGroups = c("Carriles", 
+                                         "Aparcamientos"),
+                       
+                       baseGroups = c("CartoDB.Positron", 
+                                      "OpenStreetMap",
+                                      "Esri.WorldImagery"))
+    })
+  
+  # METROBUS
+  output$METROBUS_leaflet <- renderLeaflet({
+    
+    leaflet() %>%
+      
+      addProviderTiles("CartoDB.Positron",
+                       group = "CartoDB.Positron") %>%
+      
+      addProviderTiles("OpenStreetMap", 
+                       group = "OpenStreetMap") %>%
+      
+      addProviderTiles("Esri.WorldImagery", 
+                       group = "Esri.WorldImagery") %>%  
+      
+      addPolygons(data = distritos_shiny, 
+                  color = "gray", 
+                  fillColor = 'beige',
+                  fillOpacity = 0.5,
+                  weight = 1) %>% 
+      
+      addCircleMarkers(data = bus_boca,
+                       color = "blue",
+                       fillColor = "blue",
+                       fillOpacity = 0.4,
+                       radius = 5, 
+                       weight = 2,
+                       group = "Bus",
+                       clusterOptions = markerClusterOptions(),
+                       popup = bus_boca$denominaci) %>%
+      
+      addLayersControl(overlayGroups = c("Metro", 
+                                         "Bus"),
+                       
+                       baseGroups = c("CartoDB.Positron", 
+                                      "OpenStreetMap",
+                                      "Esri.WorldImagery")) %>%
+      
+      addCircleMarkers(data = metro_boca,
+                       color = "red",
+                       fillColor = "red",
+                       fillOpacity = 0.4,
+                       radius = 5, 
+                       weight = 2,
+                       group = "Metro",
+                       clusterOptions = markerClusterOptions(),
+                       popup = metro_boca$denominaci) %>%
+      
+      addLegend(position = "bottomright",
+                colors = c("red", "blue"),
+                labels = c("Metro y tranvia", "Bus"),
+                title = "Transporte público",
+                opacity = 0.4)
+    })
+  
+  # CARGADORES
+  output$CARGADORES_leaflet <- renderLeaflet({
+    
+    leaflet() %>%
+      
+      addProviderTiles("CartoDB.Positron",
+                       group = "CartoDB.Positron") %>%
+      
+      addProviderTiles("OpenStreetMap", 
+                       group = "OpenStreetMap") %>%
+      
+      addProviderTiles("Esri.WorldImagery", 
+                       group = "Esri.WorldImagery") %>%  
+      
+      addPolygons(data = distritos_shiny, 
+                  color = "gray", 
+                  fillColor = 'beige',
+                  fillOpacity = 0.5,
+                  weight = 1) %>%
+      
+      addCircleMarkers(data = carregadors,
+                       color = "blue",
+                       fillColor = "blue",
+                       fillOpacity = 0.4,
+                       radius = 5, 
+                       weight = 2,
+                       label = carregadors$nombre,
+                       # clusterOptions = markerClusterOptions(),
+                       popup = ~paste("Ubicación: ", 
+                                      carregadors$emplazamie)) %>%
+      
+      addLayersControl(baseGroups = c("CartoDB.Positron", 
+                                      "OpenStreetMap",
+                                      "Esri.WorldImagery"))
+  })
+
+  #VIOLIN
+  datos_mp_violin <- reactive({
+    datos_violin <- geo_contaminacion_shiny %>% 
+      select(Estacion, año, !!input$VIOLIN_selectInputParticula) %>%
+      filter(!is.na(Estacion), año == input$VIOLIN_sliderInpuitAño)
+    
+    return(datos_violin)
+  })
+
+  output$VIOLIN <- renderPlot({
+    ggplot(data = datos_mp_violin(), 
+           aes(x = Estacion, y = !!sym(input$VIOLIN_selectInputParticula), 
+               fill = Estacion)) +
+      
+      geom_violin() +
+      
+      stat_summary(fun = "mean", 
+                   geom = "crossbar", 
+                   width = 0.1, 
+                   colour = "red") +
+      
+      facet_wrap(~Estacion, nrow = 3) +  
+      
+      theme(axis.text.x = element_blank(), aspect.ratio = 5/6) +
+      
+      guides(fill = FALSE)
+  })
+  
+  #TABLA
+  datos_tabla <- reactive({
+    datos <- geo_contaminacion_shiny %>% 
+      select(
+        Estacion, 
+        año, 
+        mes,
+        dia,
+        !!input$DATOS_sliderInputParticula  
+      )%>%
+      filter(
+        Estacion == input$DATOS_sliderInputEstacion
+      )
+  
+    return(datos)
+    
+  })
+  
+  output$DATOS_dataTable <- renderDataTable({
+    datos_tabla()
+  })
+ 
+
+ 
+  
+   
+}
+
+shinyApp(ui = ui, server = server)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

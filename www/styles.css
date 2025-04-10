@@ -1,0 +1,101 @@
+/* Define las variables de color
+:root {
+  --color-1: #2C3333;
+  --color-2: #395B64;
+  --color-3: #A5C9CA;
+  --color-4: #E7F6F2;
+}
+*/
+:root {
+  --color-1: #E7F6F2;
+  --color-2: #A5C9CA;
+  --color-3: #395B64;
+  --color-4: #2C3333;
+}
+
+.navbar {
+  position: fixed;
+  width: 100%;
+  z-index: 1000;
+}
+        
+.tab-content {
+  margin-top: 6%;
+}
+
+/* Estilos personalizados para la aplicación Shiny */
+
+/* Cambio de color de fondo para el body */
+body {
+    background-color: var(--color-1);
+}
+
+
+/* Cambio de color para el navbar */
+.navbar-default {
+    background-color: var(--color-3);
+    color: var(--color-1);
+}
+
+/* Cambio de color para los enlaces en el navbar */
+.navbar-default .navbar-nav > li > a {
+    color: white;
+}
+
+/* Cambio de color para el texto en el cuerpo de la página */
+body, div, p, em, strong, label, h1, h2, h3, h4, h5, h6 {
+    color: black;
+}
+
+
+/* Cambio de color para los botones */
+.btn-default {
+    background-color: var(--color-3);
+    border-color: var(--color-3);
+    color: var(--color-1);
+}
+
+/* Cambio de color para los botones en hover */
+.btn-default:hover {
+    background-color: var(--color-2);
+    border-color: var(--color-3);
+    color: var(--color-1);
+}
+
+/* Cambio de color para los botones activos */
+.btn-default:active, .btn-default.active, .open .dropdown-toggle.btn-default {
+    background-color: var(--color-2);
+    border-color: var(--color-3);
+    color: var(--color-1);
+}
+
+/* Cambio de color para los botones de enlace */
+.btn-default a {
+    color: var(--color-1);
+}
+
+/* Cambio de color para los botones de enlace en hover */
+.btn-default a:hover {
+    color: var(--color-2);
+}
+
+/* Para los formularios y selectores y sus contenedores */
+.form-group, .selectize-input, .col-sm-4, .col-sm-8, .well {
+  background-color: var(--color-1);
+}
+
+.col-sm-4 {
+  border-style: solid;
+  border-width: 3px;
+  border-color: #1a2330;
+  padding:15px;
+  border-top-width: 50px; /* Ancho del borde superior */
+}
+
+.col-sm-3 {
+  border-style: solid;
+  border-width: 3px;
+  border-color: #1a2330;
+  padding:15px;
+  border-top-width: 50px; /* Ancho del borde superior */
+}
